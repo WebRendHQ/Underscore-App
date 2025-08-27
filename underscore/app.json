@@ -18,6 +18,7 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Underscore uses the microphone to listen for keywords and select music.",
+        "NSSpeechRecognitionUsageDescription": "Underscore uses speech recognition to understand your commands.",
         "UIBackgroundModes": [
           "audio"
         ]

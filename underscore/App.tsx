@@ -13,11 +13,12 @@ import SignUpScreen from './src/auth/SignUpScreen';
 import { db } from './src/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { setupVoice, startListening, stopListening, destroyListening } from './src/speech';
 import { fetchUserPlaylists, pickTrackUriByKeyword } from './src/spotify';
 
 WebBrowser.maybeCompleteAuthSession();
 
-const SPOTIFY_CLIENT_ID = 'YOUR_SPOTIFY_CLIENT_ID';
+const SPOTIFY_CLIENT_ID = process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID as string;
 const SPOTIFY_SCOPES = ['user-read-email', 'playlist-read-private', 'playlist-read-collaborative', 'user-modify-playback-state'];
 const SECURE_TOKEN_KEY = 'spotify_token_response';
 
@@ -25,7 +26,10 @@ function HomeScreen() {
   const { user } = useAuth();
   // Existing Spotify UI becomes Home screen
   const isExpoGo = true;
-  const redirectUri = makeRedirectUri({ scheme: 'underscore' });
+  const redirectUri = (makeRedirectUri as any)({ scheme: 'underscore', useProxy: true });
+  console.log('redirectUri =>', redirectUri);
+  const [listening, setListening] = React.useState(false);
+  const [partial, setPartial] = React.useState('');
 
   const [request, response, promptAsync] = useAuthRequest(
     {
@@ -62,7 +66,7 @@ function HomeScreen() {
 
   async function handleAuth() {
     try {
-      const result = await promptAsync();
+      const result = await (promptAsync as any)({ useProxy: true });
       if (result.type !== 'success' || !('params' in result) || !(result as any).params?.code) return;
       const code = (result as any).params.code as string;
       const token = await exchangeCodeAsync(
@@ -138,6 +142,50 @@ function HomeScreen() {
     }
   }
 
+  React.useEffect(() => {
+    setupVoice({
+      onPartial: setPartial,
+      onFinal: async (text) => {
+        try {
+          if (!user) return;
+          const functions = getFunctions();
+          const classify = httpsCallable(functions, 'classifyUtterance');
+          const result: any = await classify({ text });
+          const mood: string = result?.data?.mood ?? 'neutral';
+          const query: string = result?.data?.query ?? mood;
+          // Basic search fallback by mood keyword
+          const token = await loadToken();
+          if (!token) return;
+          const searchRes = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=1`, {
+            headers: { Authorization: `Bearer ${token.accessToken}` },
+          });
+          const json = await searchRes.json();
+          const trackUri = json?.tracks?.items?.[0]?.uri;
+          if (trackUri) {
+            await openSpotifyToPlay(String(trackUri).replace('spotify:track:', ''));
+          }
+        } catch (e) {
+          console.warn('classify/play error', e);
+        }
+      },
+    });
+    return () => { destroyListening(); };
+  }, [user]);
+
+  async function toggleListening() {
+    try {
+      if (listening) {
+        await stopListening();
+        setListening(false);
+      } else {
+        await startListening();
+        setListening(true);
+      }
+    } catch (e) {
+      Alert.alert('Speech error', String(e));
+    }
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Underscore</Text>
@@ -154,6 +202,11 @@ function HomeScreen() {
       <Pressable style={styles.buttonSecondary} onPress={demoPickByKeyword}>
         <Text style={styles.buttonText}>Pick by keyword: "focus"</Text>
       </Pressable>
+
+      <Pressable style={listening ? styles.buttonStop : styles.button} onPress={toggleListening}>
+        <Text style={styles.buttonText}>{listening ? 'Stop Listening' : 'Start Listening'}</Text>
+      </Pressable>
+      {!!partial && <Text style={{ marginTop: 8, color: '#777' }} numberOfLines={2}>Heard: {partial}</Text>}
 
       <StatusBar style="auto" />
     </View>
@@ -222,6 +275,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 8,
+  },
+  buttonStop: {
+    backgroundColor: '#d00000',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 12,
   },
   buttonText: {
     color: '#fff',

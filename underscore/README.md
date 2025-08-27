@@ -18,6 +18,17 @@ This app connects to Spotify via OAuth, listens for keywords (future), and opens
 
 Sign-in/Sign-up are implemented using Firebase Authentication. After connecting Spotify, a minimal token snapshot is stored in Firestore under `users/{uid}/spotify` (see `App.tsx`). Avoid storing long-lived access tokens unencrypted in production.
 
+### AI inference (OpenAI)
+
+- Set the OpenAI key as a Firebase Functions secret and deploy:
+```bash
+cd ../functions
+firebase functions:secrets:set OPENAI_API_KEY
+npm run build && firebase deploy --only functions
+```
+- The client calls `classifyUtterance` → returns `{ mood, query, tags }`.
+- We search Spotify with the `query` and play a result.
+
 ### Running
 
 ```bash
